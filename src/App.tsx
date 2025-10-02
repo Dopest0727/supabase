@@ -26,6 +26,15 @@ function App() {
     setTaks(data);
   };
 
+  const deleteTask = async (id: number) => {
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+
+    if (error) {
+      console.error("Error deleting task: ", error.message);
+      return;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const { error } = await supabase.from("tasks").insert(newTask).single();
@@ -70,6 +79,7 @@ function App() {
       <ul style={{ listStyle: "none", padding: 0 }}>
         {tasks.map((task, key) => (
           <li
+            key={key}
             style={{
               border: "1px solid #ccc",
               borderRadius: "4px",
@@ -78,15 +88,20 @@ function App() {
             }}
           >
             <div>
-              <h3>Title</h3>
-              <p>Description</p>
+              <h3>{task.title}</h3>
+              <p>{task.description}</p>
               <div>
                 <button
                   style={{ padding: "0.5rem 1rem", marginRight: "0.5rem" }}
                 >
                   Edit
                 </button>
-                <button style={{ padding: "0.5rem 1rem" }}>Delete</button>
+                <button
+                  style={{ padding: "0.5rem 1rem" }}
+                  onClick={() => deleteTask(task.id)}
+                >
+                  Delete
+                </button>
               </div>
             </div>
           </li>
