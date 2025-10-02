@@ -1,131 +1,46 @@
 import { useEffect, useState } from "react";
 import "./App.css";
+import { Auth } from "./components/auth";
+import TaskManager from "./components/task-manager";
 import supabase from "./supabase-client";
-
-interface Task {
-  id: number;
-  title: string;
-  description: string;
-  created_at: string;
-}
+import type Session from "@supabase/supabase-js";
 
 function App() {
-  const [newTask, setNewTask] = useState({ title: "", description: "" });
-  const [tasks, setTaks] = useState<Task[]>([]);
-  const [newDescription, setNewDescription] = useState("");
-
-  const fetchTasks = async () => {
-    const { error, data } = await supabase
-      .from("tasks")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("Error reading task: ", error.message);
-      return;
-    }
-    setTaks(data);
-  };
-
-  const deleteTask = async (id: number) => {
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
-
-    if (error) {
-      console.error("Error deleting task: ", error.message);
-      return;
-    }
-  };
-
-  const updateTask = async (id: number) => {
-    const { error } = await supabase
-      .from("tasks")
-      .update({ description: newDescription })
-      .eq("id", id);
-
-    if (error) {
-      console.error("Error updating task: ", error.message);
-      return;
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const { error } = await supabase.from("tasks").insert(newTask).single();
-
-    if (error) {
-      console.error("Error adding task: ", error.message);
-      return;
-    }
-
-    setNewTask({ title: "", description: "" });
+  const [session, setSession] = useState<Session | null>(null);
+  const fetchSession = async () => {
+    const currentSession = await supabase.auth.getSession();
+    console.log(currentSession);
+    setSession(currentSession.data.session);
   };
 
   useEffect(() => {
-    fetchTasks();
+    fetchSession();
+
+    const { data: authListerner } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+      }
+    );
+    return () => {
+      authListerner.subscription.unsubscribe();
+    };
   }, []);
 
-  console.log(tasks);
+  const logout = async () => {
+    await supabase.auth.signOut();
+  };
 
   return (
-    <div style={{ maxWidth: "600px", margin: "0 auto", padding: "1rem" }}>
-      <h2>Task Manager CRUD</h2>
-      <form onSubmit={handleSubmit} style={{ marginBottom: "1rem" }}>
-        <input
-          type="text"
-          placeholder="Task title"
-          onChange={(e) =>
-            setNewTask((prev) => ({ ...prev, title: e.target.value }))
-          }
-          style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem" }}
-        />
-        <textarea
-          placeholder="Task Description"
-          onChange={(e) =>
-            setNewTask((prev) => ({ ...prev, description: e.target.value }))
-          }
-          style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem" }}
-        />
-        <button type="submit" style={{ padding: "0.5rem 1rem" }}>
-          Add Task
-        </button>
-      </form>
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {tasks.map((task, key) => (
-          <li
-            key={key}
-            style={{
-              border: "1px solid #ccc",
-              borderRadius: "4px",
-              padding: "1rem",
-              marginBottom: "0.5rem",
-            }}
-          >
-            <div>
-              <h3>{task.title}</h3>
-              <p>{task.description}</p>
-              <div>
-                <textarea
-                  placeholder="Updated description"
-                  onChange={(e) => setNewDescription(e.target.value)}
-                />
-                <button
-                  style={{ padding: "0.5rem 1rem", marginRight: "0.5rem" }}
-                  onClick={() => updateTask(task.id)}
-                >
-                  Edit
-                </button>
-                <button
-                  style={{ padding: "0.5rem 1rem" }}
-                  onClick={() => deleteTask(task.id)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <>
+      {session ? (
+        <>
+          <button onClick={logout}>Log Out</button>
+          <TaskManager session={session} />
+        </>
+      ) : (
+        <Auth />
+      )}
+    </>
   );
 }
 
