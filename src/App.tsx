@@ -12,6 +12,7 @@ interface Task {
 function App() {
   const [newTask, setNewTask] = useState({ title: "", description: "" });
   const [tasks, setTaks] = useState<Task[]>([]);
+  const [newDescription, setNewDescription] = useState("");
 
   const fetchTasks = async () => {
     const { error, data } = await supabase
@@ -31,6 +32,18 @@ function App() {
 
     if (error) {
       console.error("Error deleting task: ", error.message);
+      return;
+    }
+  };
+
+  const updateTask = async (id: number) => {
+    const { error } = await supabase
+      .from("tasks")
+      .update({ description: newDescription })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error updating task: ", error.message);
       return;
     }
   };
@@ -91,8 +104,13 @@ function App() {
               <h3>{task.title}</h3>
               <p>{task.description}</p>
               <div>
+                <textarea
+                  placeholder="Updated description"
+                  onChange={(e) => setNewDescription(e.target.value)}
+                />
                 <button
                   style={{ padding: "0.5rem 1rem", marginRight: "0.5rem" }}
+                  onClick={() => updateTask(task.id)}
                 >
                   Edit
                 </button>
