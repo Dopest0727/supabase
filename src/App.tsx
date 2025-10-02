@@ -3,7 +3,7 @@ import "./App.css";
 import { Auth } from "./components/auth";
 import TaskManager from "./components/task-manager";
 import supabase from "./supabase-client";
-import type Session from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);

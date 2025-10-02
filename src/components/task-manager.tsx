@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import { useEffect, useState, useCallback } from "react";
+import type { FormEvent, ChangeEvent } from "react";
 import supabase from "../supabase-client";
 import type { Session } from "@supabase/supabase-js";
 
@@ -8,189 +8,194 @@ interface Task {
   title: string;
   description: string;
   created_at: string;
-  image_url: string;
+  user_id: string;
 }
 
-function TaskManager({ session }: { session: Session }) {
-  const [newTask, setNewTask] = useState<{
-    title: string;
-    description: string;
-  }>({
-    title: "",
-    description: "",
-  });
+interface TaskManagerProps {
+  session: Session;
+}
+
+export default function TaskManager({ session }: TaskManagerProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [newDescription, setNewDescription] = useState("");
+  const [newTask, setNewTask] = useState({ title: "", description: "" });
+  const [editingDescriptions, setEditingDescriptions] = useState<
+    Record<number, string>
+  >({});
 
-  const [taskImage, setTaskImage] = useState<File | null>(null);
-
-  const fetchTasks = async () => {
-    const { error, data } = await supabase
+  const fetchTasks = useCallback(async () => {
+    const { data, error } = await supabase
       .from("tasks")
       .select("*")
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: true });
 
     if (error) {
-      console.error("Error reading task: ", error.message);
+      console.error("Error fetching tasks:", error.message);
       return;
     }
 
-    setTasks(data);
-  };
-
-  const deleteTask = async (id: number) => {
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
-
-    if (error) {
-      console.error("Error deleting task: ", error.message);
-      return;
-    }
-  };
-
-  const updateTask = async (id: number) => {
-    const { error } = await supabase
-      .from("tasks")
-      .update({ description: newDescription })
-      .eq("id", id);
-
-    if (error) {
-      console.error("Error updating task: ", error.message);
-      return;
-    }
-  };
-
-  const uploadImage = async (file: File): Promise<string | null> => {
-    const filePath = `${file.name}-${Date.now()}`;
-
-    const { error } = await supabase.storage
-      .from("tasks-images")
-      .upload(filePath, file);
-
-    if (error) {
-      console.error("Error uploading image:", error.message);
-      return null;
-    }
-
-    const { data } = await supabase.storage
-      .from("tasks-images")
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
-  };
+    setTasks(data as Task[]);
+  }, [session.user.id]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    let imageUrl: string | null = null;
-    if (taskImage) {
-      imageUrl = await uploadImage(taskImage);
-    }
-
     const { error } = await supabase
       .from("tasks")
-      .insert({ ...newTask, email: session.user.email, image_url: imageUrl })
-      .select()
-      .single();
+      .insert({ ...newTask, user_id: session.user.id });
 
     if (error) {
-      console.error("Error adding task: ", error.message);
+      console.error("Error adding task:", error.message);
       return;
     }
 
     setNewTask({ title: "", description: "" });
   };
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setTaskImage(e.target.files[0]);
-    }
+  const updateTask = async (id: number, description: string) => {
+    const { error } = await supabase
+      .from("tasks")
+      .update({ description })
+      .eq("id", id);
+
+    if (error) console.error("Error updating task:", error.message);
+    setEditingDescriptions((prev) => ({ ...prev, [id]: "" }));
+  };
+
+  const deleteTask = async (id: number) => {
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) console.error("Error deleting task:", error.message);
   };
 
   useEffect(() => {
     fetchTasks();
-  }, []);
 
-  useEffect(() => {
-    const channel = supabase.channel("tasks-channel");
-    channel
+    const channel = supabase
+      .channel("tasks-channel")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "tasks" },
-        (payload) => {
-          const newTask = payload.new as Task;
-          setTasks((prev) => [...prev, newTask]);
+        { event: "*", schema: "public", table: "tasks" },
+        (payload: any) => {
+          switch (payload.eventType) {
+            case "INSERT":
+              if (payload.new) setTasks((prev) => [...prev, payload.new]);
+              break;
+            case "UPDATE":
+              if (payload.new)
+                setTasks((prev) =>
+                  prev.map((t) => (t.id === payload.new!.id ? payload.new! : t))
+                );
+              break;
+            case "DELETE":
+              if (payload.old)
+                setTasks((prev) =>
+                  prev.filter((t) => t.id !== payload.old!.id)
+                );
+              break;
+          }
         }
       )
-      .subscribe((status) => {
-        console.log("Subscription: ", status);
-      });
-  }, []);
+      .subscribe();
 
-  console.log(tasks);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchTasks]);
 
   return (
-    <div style={{ maxWidth: "600px", margin: "0 auto", padding: "1rem" }}>
-      <h2>Task Manager CRUD</h2>
+    <div
+      style={{
+        maxWidth: 600,
+        margin: "0 auto",
+        padding: 16,
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <h2 style={{ textAlign: "center", marginBottom: 16 }}>Task Manager</h2>
 
-      {/* Form to add a new task */}
-      <form onSubmit={handleSubmit} style={{ marginBottom: "1rem" }}>
+      <form onSubmit={handleSubmit} style={{ marginBottom: 16 }}>
         <input
           type="text"
-          placeholder="Task Title"
-          onChange={(e) =>
+          placeholder="Task title"
+          value={newTask.title}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
             setNewTask((prev) => ({ ...prev, title: e.target.value }))
           }
-          style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem" }}
+          style={{
+            width: "100%",
+            padding: 8,
+            marginBottom: 8,
+            borderRadius: 4,
+            border: "1px solid #ccc",
+          }}
         />
         <textarea
-          placeholder="Task Description"
-          onChange={(e) =>
+          placeholder="Task description"
+          value={newTask.description}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
             setNewTask((prev) => ({ ...prev, description: e.target.value }))
           }
-          style={{ width: "100%", marginBottom: "0.5rem", padding: "0.5rem" }}
+          style={{
+            width: "100%",
+            padding: 8,
+            marginBottom: 8,
+            borderRadius: 4,
+            border: "1px solid #ccc",
+          }}
         />
-
-        <input type="file" accept="image/*" onChange={handleFileChange} />
-
-        <button type="submit" style={{ padding: "0.5rem 1rem" }}>
+        <button
+          type="submit"
+          style={{ padding: "8px 16px", cursor: "pointer" }}
+        >
           Add Task
         </button>
       </form>
 
-      {/* List of Tasks */}
       <ul style={{ listStyle: "none", padding: 0 }}>
-        {tasks.map((task, key) => (
+        {tasks.map((task) => (
           <li
-            key={key}
+            key={task.id}
             style={{
               border: "1px solid #ccc",
-              borderRadius: "4px",
-              padding: "1rem",
-              marginBottom: "0.5rem",
+              borderRadius: 4,
+              padding: 12,
+              marginBottom: 8,
             }}
           >
-            <div>
-              <h3>{task.title}</h3>
-              <p>{task.description}</p>
-              <img src={task.image_url} style={{ height: 70 }} />
-              <div>
-                <textarea
-                  placeholder="Updated description..."
-                  onChange={(e) => setNewDescription(e.target.value)}
-                />
-                <button
-                  style={{ padding: "0.5rem 1rem", marginRight: "0.5rem" }}
-                  onClick={() => updateTask(task.id)}
-                >
-                  Edit
-                </button>
-                <button
-                  style={{ padding: "0.5rem 1rem" }}
-                  onClick={() => deleteTask(task.id)}
-                >
-                  Delete
-                </button>
-              </div>
+            <strong>{task.title}</strong>
+            <p>{task.description}</p>
+            <textarea
+              placeholder="Edit description..."
+              value={editingDescriptions[task.id] || ""}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
+                setEditingDescriptions((prev) => ({
+                  ...prev,
+                  [task.id]: e.target.value,
+                }))
+              }
+              style={{
+                width: "100%",
+                padding: 6,
+                marginBottom: 6,
+                borderRadius: 4,
+                border: "1px solid #ccc",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() =>
+                  updateTask(task.id, editingDescriptions[task.id] || "")
+                }
+                style={{ flex: 1, padding: 6, cursor: "pointer" }}
+              >
+                Update
+              </button>
+              <button
+                onClick={() => deleteTask(task.id)}
+                style={{ flex: 1, padding: 6, cursor: "pointer" }}
+              >
+                Delete
+              </button>
             </div>
           </li>
         ))}
@@ -198,5 +203,3 @@ function TaskManager({ session }: { session: Session }) {
     </div>
   );
 }
-
-export default TaskManager;
